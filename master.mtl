@@ -1,0 +1,19 @@
+newmtl neon_green
+Kd 0.0000 1.0000 0.0000
+illum 0
+
+newmtl fresnel_win
+Ka 0.0000 0.0000 1.0000
+Kd 0.0000 0.0000 1.0000
+Ks 0.6180 0.8760 0.1430
+Tf 1.0000 1.0000 1.0000
+Ns 200
+Ni 1.2000
+illum 7
+
+newmtl wood
+Ka 0.0000 0.2000 0.0000
+Kd 0.0000 0.8000 0.0000
+illum 1
+map_Ka wood.jpg
+map_Kd wood.jpg

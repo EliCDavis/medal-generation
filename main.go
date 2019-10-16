@@ -109,6 +109,63 @@ func fill(width float64, height float64, shapes []mesh.Shape) ([]mesh.Polygon, e
 	return betterPolys, nil
 }
 
+func makeBottomPlate(resolution int, radius float64) []mesh.Polygon {
+	polys := make([]mesh.Polygon, resolution)
+
+	angleIncrement := (1.0 / float64(resolution)) * 2.0 * math.Pi
+	for sideIndex := 0; sideIndex < resolution; sideIndex++ {
+		angle := angleIncrement * float64(sideIndex)
+		angleNext := angleIncrement * (float64(sideIndex) + 1)
+
+		points := []vector.Vector3{
+			vector.NewVector3(math.Cos(angle)*radius, 0, math.Sin(angle)*radius),
+			vector.NewVector3(math.Cos(angleNext)*radius, 0, math.Sin(angleNext)*radius),
+			vector.NewVector3(0, 0, 0),
+		}
+
+		tex := []vector.Vector2{
+			vector.NewVector2(0, 0),
+			vector.NewVector2(1, 0),
+			vector.NewVector2(1, 1),
+		}
+
+		poly, _ := mesh.NewPolygonWithTexture(points, points, tex)
+
+		polys[sideIndex] = poly
+
+	}
+
+	return polys
+}
+
+func makeTopPlate(resolution int, radius, height float64) []mesh.Polygon {
+	polys := make([]mesh.Polygon, resolution)
+
+	angleIncrement := (1.0 / float64(resolution)) * 2.0 * math.Pi
+	for sideIndex := 0; sideIndex < resolution; sideIndex++ {
+		angle := angleIncrement * float64(sideIndex)
+		angleNext := angleIncrement * (float64(sideIndex) + 1)
+
+		points := []vector.Vector3{
+			vector.NewVector3(0, height, 0),
+			vector.NewVector3(math.Cos(angleNext)*radius, height, math.Sin(angleNext)*radius),
+			vector.NewVector3(math.Cos(angle)*radius, height, math.Sin(angle)*radius),
+		}
+
+		tex := []vector.Vector2{
+			vector.NewVector2(0, 0),
+			vector.NewVector2(1, 0),
+			vector.NewVector2(1, 1),
+		}
+
+		poly, _ := mesh.NewPolygonWithTexture(points, points, tex)
+
+		polys[sideIndex] = poly
+	}
+
+	return polys
+}
+
 func carve(width float64, height float64, shapes []mesh.Shape) ([]mesh.Polygon, error) {
 
 	for _, shape := range shapes {
@@ -218,12 +275,12 @@ func main() {
 	startingRadius := 1.
 
 	// How much extra radius will be added to the side of the medal as it bulges
-	maxRadiusBulge := .2
+	maxRadiusBulge := .1
 
 	// how many rings we will use to aproximate the side of the medal bulging out
 	bulgeResolution := 10
 
-	ringHeight := .8
+	ringHeight := .6
 
 	// How many lines we will use to "draw" a circle
 	sides := 64
@@ -241,6 +298,9 @@ func main() {
 			(maxRadiusBulge*math.Sin(math.Pi*sinIncrement*b))+startingRadius,
 			(math.Sin(math.Pi*sinIncrement*(b+1))*maxRadiusBulge)+startingRadius)...)
 	}
+
+	polys = append(polys, makeBottomPlate(sides, startingRadius)...)
+	polys = append(polys, makeTopPlate(sides, startingRadius, ringHeight)...)
 
 	medalModel, err := mesh.NewModel(polys)
 	check(err)

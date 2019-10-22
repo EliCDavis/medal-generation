@@ -3,23 +3,21 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
+	"time"
 
 	"github.com/EliCDavis/mesh"
 	"github.com/EliCDavis/vector"
+	"github.com/golang/freetype/truetype"
 	"github.com/pradeep-pyro/triangle"
+	"golang.org/x/image/font"
 )
 
-func check(e error) {
-	if e != nil {
-		log.Panicln(e.Error())
-		panic(e)
-	}
-}
-
-func makeSquare(
+func makeSquareWithTexture(
 	bottomLeft vector.Vector3,
 	topLeft vector.Vector3,
 	topRight vector.Vector3,
@@ -29,32 +27,28 @@ func makeSquare(
 	topLeftTexture vector.Vector2,
 	topRightTexture vector.Vector2,
 	bottomRightTexture vector.Vector2,
-) ([]mesh.Polygon, error) {
+) []mesh.Polygon {
 	polys := make([]mesh.Polygon, 2)
 
-	poly, err := mesh.NewPolygonWithTexture(
+	poly, _ := mesh.NewPolygonWithTexture(
 		[]vector.Vector3{bottomLeft, topLeft, bottomRight},
 		[]vector.Vector3{bottomLeft, topLeft, bottomRight},
 		[]vector.Vector2{bottomLeftTexture, topLeftTexture, bottomRightTexture},
 	)
-	if err != nil {
-		return nil, err
-	}
+
 	polys[0] = poly
 
-	poly, err = mesh.NewPolygonWithTexture(
+	poly, _ = mesh.NewPolygonWithTexture(
 		[]vector.Vector3{topLeft, topRight, bottomRight},
 		[]vector.Vector3{topLeft, topRight, bottomRight},
 		[]vector.Vector2{topLeftTexture, topRightTexture, bottomRightTexture},
 	)
-	if err != nil {
-		return nil, err
-	}
+
 	polys[1] = poly
-	return polys, nil
+	return polys
 }
 
-func fill(width float64, height float64, shapes []mesh.Shape) ([]mesh.Polygon, error) {
+func fill(shapes []mesh.Shape) ([]mesh.Polygon, error) {
 
 	for _, shape := range shapes {
 		if len(shape.GetPoints()) < 3 {
@@ -250,7 +244,7 @@ func makeRing(resolution int, startingHeight, endingHeight, bottomRadius, topRad
 		bottomRightUV := vector.NewVector2(math.Min(float64(sideIndex+1)/float64(resPerTextToRepeat), 1), 0)
 
 		// outer
-		square, err := makeSquare(
+		square := makeSquareWithTexture(
 			vector.NewVector3(math.Cos(angle)*bottomRadius, startingHeight, math.Sin(angle)*bottomRadius),
 			vector.NewVector3(math.Cos(angle)*topRadius, endingHeight, math.Sin(angle)*topRadius),
 			vector.NewVector3(math.Cos(angleNext)*topRadius, endingHeight, math.Sin(angleNext)*topRadius),
@@ -261,7 +255,6 @@ func makeRing(resolution int, startingHeight, endingHeight, bottomRadius, topRad
 			bottomRightUV,
 		)
 
-		check(err)
 		polys[(sideIndex * 2)] = square[0]
 		polys[(sideIndex*2)+1] = square[1]
 
@@ -270,7 +263,10 @@ func makeRing(resolution int, startingHeight, endingHeight, bottomRadius, topRad
 	return polys
 }
 
-func main() {
+// MakeMedalion creates a 3D object that represents a medal
+func MakeMedalion(medalionThickness, designImpression float64) (mesh.Model, error) {
+
+	defer timeTrack(time.Now(), "Creating Medal")
 
 	startingRadius := 1.
 
@@ -280,15 +276,13 @@ func main() {
 	// how many rings we will use to aproximate the side of the medal bulging out
 	bulgeResolution := 10
 
-	ringHeight := .6
-
 	// How many lines we will use to "draw" a circle
 	sides := 64
 
 	polys := make([]mesh.Polygon, 0)
 
 	sinIncrement := 1. / float64(bulgeResolution)
-	ringHeightIncrement := ringHeight * sinIncrement
+	ringHeightIncrement := medalionThickness * sinIncrement
 	for b := 0.; b < float64(bulgeResolution); b += 1.0 {
 		// resolution int, startingHeight, endingHeight, bottomRadius, topRadius float64
 		polys = append(polys, makeRing(
@@ -300,19 +294,173 @@ func main() {
 	}
 
 	polys = append(polys, makeBottomPlate(sides, startingRadius)...)
-	polys = append(polys, makeTopPlate(sides, startingRadius, ringHeight)...)
 
-	medalModel, err := mesh.NewModel(polys)
-	check(err)
+	ringBorder := 0.05
+	polys = append(polys, makeRing(sides, medalionThickness, medalionThickness, startingRadius, startingRadius-ringBorder)...)
+	polys = append(polys, makeRing(sides, medalionThickness, medalionThickness-designImpression, startingRadius-ringBorder, startingRadius-ringBorder)...)
+	polys = append(polys, makeTopPlate(sides, startingRadius-ringBorder, medalionThickness-designImpression)...)
 
-	log.Println("completed")
+	return mesh.NewModel(polys)
+}
 
-	f, err := os.Create("out.obj")
-	check(err)
+func TextToShape(textToWrite string) ([]mesh.Shape, error) {
+
+	defer timeTrack(time.Now(), fmt.Sprintf("Generating Text: %s", textToWrite))
+
+	fontByteData, err := ioutil.ReadFile("./sample.ttf")
+
+	if err != nil {
+		return nil, err
+	}
+
+	parsedFont, err := truetype.Parse(fontByteData)
+
+	if err != nil {
+		return nil, err
+	}
+
+	finalWord := make([]mesh.Shape, len(textToWrite))
+
+	accumulatedWidth := 0.
+
+	for charIndex, char := range textToWrite {
+
+		glyph := truetype.GlyphBuf{}
+		glyph.Load(parsedFont, 100, parsedFont.Index(char), font.HintingNone)
+
+		letterPoints := make([]vector.Vector2, len(glyph.Points))
+		for i, p := range glyph.Points {
+			letterPoints[i] = vector.NewVector2(float64(p.X), float64(p.Y))
+		}
+
+		shape, err := mesh.NewShape(letterPoints)
+		if err != nil {
+			continue
+		}
+
+		shrunkShape := shape.Scale(.01)
+
+		bottomLeftBounds, topRightBounds := shrunkShape.GetBounds()
+		accumulatedWidth += (topRightBounds.X() - bottomLeftBounds.X())
+
+		finalWord[charIndex] = shrunkShape.Translate(vector.NewVector2(accumulatedWidth, 0))
+	}
+
+	return finalWord, nil
+}
+
+func saveMedal(medal mesh.Model, name string) error {
+	defer timeTrack(time.Now(), "Saving Medal")
+
+	f, err := os.Create(name)
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 
 	w := bufio.NewWriter(f)
-	medalModel.Save(w)
-	w.Flush()
+	err = medal.Save(w)
+	if err != nil {
+		return err
+	}
+	return w.Flush()
+}
+
+func ExtrudeShape(shapes []mesh.Shape, dist float64) (mesh.Model, error) {
+
+	polys, err := fill(shapes)
+	if err != nil {
+		return mesh.Model{}, err
+	}
+
+	model, err := mesh.NewModel(polys)
+	if err != nil {
+		return mesh.Model{}, err
+	}
+
+	otherEnd := model.Translate(vector.NewVector3(0, dist, 0))
+
+	stitching := make([]mesh.Polygon, 0)
+	for polyIndex := 0; polyIndex < len(polys); polyIndex++ {
+
+		verticesStart := polys[polyIndex].GetVertices()
+		verticesEnd := otherEnd.GetFaces()[polyIndex].GetVertices()
+
+		for v := 0; v < len(verticesStart); v++ {
+			endingIndex := (v + 1) % len(verticesStart)
+			stitching = append(stitching, makeSquareWithTexture(
+				verticesStart[v],
+				verticesEnd[v],
+				verticesEnd[endingIndex],
+				verticesStart[endingIndex],
+				vector.NewVector2(0, 0),
+				vector.NewVector2(0, 1),
+				vector.NewVector2(1, 1),
+				vector.NewVector2(1, 0),
+			)...)
+		}
+
+	}
+
+	stiches, err := mesh.NewModel(stitching)
+
+	if err != nil {
+		return mesh.Model{}, err
+	}
+
+	return model.Merge(otherEnd).Merge(stiches), nil
+}
+
+func TextToModel(text string, extrusion float64) (mesh.Model, error) {
+	shapes, err := TextToShape(text)
+	if err != nil {
+		return mesh.Model{}, err
+	}
+
+	model, err := ExtrudeShape(shapes, extrusion)
+	if err != nil {
+		return mesh.Model{}, err
+	}
+
+	return model.
+		Scale(vector.NewVector3(-1, 1, 1), model.GetCenterOfBoundingBox()), nil
+}
+
+func timeTrack(start time.Time, name string) {
+	elapsed := time.Since(start)
+	log.Printf("%s took %s", name, elapsed)
+}
+
+func main() {
+
+	medallionThickness := .6
+
+	medallionImpression := .1
+
+	medal, err := MakeMedalion(medallionThickness, medallionImpression)
+
+	if err != nil {
+		panic(err)
+	}
+
+	text, err := TextToModel("Test", medallionImpression)
+
+	if err != nil {
+		panic(err)
+	}
+
+	offset := text.GetCenterOfBoundingBox().Sub(medal.GetCenterOfBoundingBox())
+
+	textCentered := text.Translate(vector.NewVector3(
+		-offset.X(),
+		medallionThickness-medallionImpression,
+		-offset.Z(),
+	))
+
+	err = saveMedal(medal.Merge(textCentered), "out.obj")
+
+	if err != nil {
+		panic(err)
+	}
 
 }

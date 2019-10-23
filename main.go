@@ -417,7 +417,13 @@ func TextToModel(text string, extrusion float64) (mesh.Model, error) {
 		return mesh.Model{}, err
 	}
 
-	model, err := ExtrudeShape(shapes, extrusion)
+	center := mesh.CenterOfBoundingBoxOfShapes(shapes)
+	rotatedShapes := make([]mesh.Shape, len(shapes))
+	for i, s := range shapes {
+		rotatedShapes[i] = s.Rotate(math.Pi*.5, center)
+	}
+
+	model, err := ExtrudeShape(rotatedShapes, extrusion)
 	if err != nil {
 		return mesh.Model{}, err
 	}
@@ -443,7 +449,7 @@ func main() {
 		panic(err)
 	}
 
-	text, err := TextToModel("Test", medallionImpression)
+	text, err := TextToModel("Alex", medallionImpression)
 
 	if err != nil {
 		panic(err)

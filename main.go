@@ -303,7 +303,7 @@ func MakeMedalion(medalionThickness, designImpression float64) (mesh.Model, erro
 	return mesh.NewModel(polys)
 }
 
-func TextToShape(textToWrite string) ([]mesh.Shape, error) {
+func TextToShape(textToWrite string) ([][]mesh.Shape, error) {
 
 	defer timeTrack(time.Now(), fmt.Sprintf("Generating Text: %s", textToWrite))
 
@@ -319,7 +319,7 @@ func TextToShape(textToWrite string) ([]mesh.Shape, error) {
 		return nil, err
 	}
 
-	finalWord := make([]mesh.Shape, len(textToWrite))
+	finalWord := make([][]mesh.Shape, len(textToWrite))
 
 	accumulatedWidth := 0.
 
@@ -343,7 +343,7 @@ func TextToShape(textToWrite string) ([]mesh.Shape, error) {
 		bottomLeftBounds, topRightBounds := shrunkShape.GetBounds()
 		accumulatedWidth += (topRightBounds.X() - bottomLeftBounds.X())
 
-		finalWord[charIndex] = shrunkShape.Translate(vector.NewVector2(accumulatedWidth, 0))
+		finalWord[charIndex] = []mesh.Shape{shrunkShape.Translate(vector.NewVector2(accumulatedWidth, 0))}
 	}
 
 	return finalWord, nil
@@ -411,25 +411,18 @@ func ExtrudeShape(shapes []mesh.Shape, dist float64) (mesh.Model, error) {
 	return model.Merge(otherEnd).Merge(stiches), nil
 }
 
-func TextToModel(text string, extrusion float64) (mesh.Model, error) {
-	shapes, err := TextToShape(text)
+func TextToModel(text string, extrusion float64, letterShapeModifier func([][]mesh.Shape) []mesh.Shape) (mesh.Model, error) {
+	letterShapes, err := TextToShape(text)
 	if err != nil {
 		return mesh.Model{}, err
 	}
 
-	center := mesh.CenterOfBoundingBoxOfShapes(shapes)
-	rotatedShapes := make([]mesh.Shape, len(shapes))
-	for i, s := range shapes {
-		rotatedShapes[i] = s.Rotate(math.Pi*.5, center)
-	}
-
-	model, err := ExtrudeShape(rotatedShapes, extrusion)
+	model, err := ExtrudeShape(letterShapeModifier(letterShapes), extrusion)
 	if err != nil {
 		return mesh.Model{}, err
 	}
 
-	return model.
-		Scale(vector.NewVector3(-1, 1, 1), model.GetCenterOfBoundingBox()), nil
+	return model.Scale(vector.NewVector3(-.4, .4, .4), model.GetCenterOfBoundingBox()), nil
 }
 
 func timeTrack(start time.Time, name string) {
@@ -449,21 +442,57 @@ func main() {
 		panic(err)
 	}
 
-	text, err := TextToModel("Alex", medallionImpression)
+	topText, err := TextToModel("Hello", medallionImpression, func(letters [][]mesh.Shape) []mesh.Shape {
+		rotatedShapes := make([]mesh.Shape, 0)
+		angleIncrements := math.Pi / float64(len(letters))
+
+		for i, letterShape := range letters {
+			curAngle := (math.Pi / 2.0) - (angleIncrements * float64(i)) - (angleIncrements / 2.0)
+			centerOfShapes := mesh.CenterOfBoundingBoxOfShapes(letterShape)
+			for _, shape := range letterShape {
+				repositioned := shape.Translate(centerOfShapes.MultByConstant(-1).Add(vector.NewVector2(0.0, 1.6)))
+				rotatedShapes = append(rotatedShapes, repositioned.Rotate(curAngle, vector.Vector2Zero()))
+			}
+		}
+		return rotatedShapes
+	})
 
 	if err != nil {
 		panic(err)
 	}
 
-	offset := text.GetCenterOfBoundingBox().Sub(medal.GetCenterOfBoundingBox())
+	bottomText, err := TextToModel("dlroW", medallionImpression, func(letters [][]mesh.Shape) []mesh.Shape {
+		rotatedShapes := make([]mesh.Shape, 0)
+		angleIncrements := math.Pi / float64(len(letters))
 
-	textCentered := text.Translate(vector.NewVector3(
-		-offset.X(),
+		for i, letterShape := range letters {
+			curAngle := (math.Pi / 2.0) - (angleIncrements * float64(i)) - (angleIncrements / 2.0)
+			centerOfShapes := mesh.CenterOfBoundingBoxOfShapes(letterShape)
+			for _, shape := range letterShape {
+				repositioned := shape.Translate(centerOfShapes.MultByConstant(-1).Add(vector.NewVector2(0.0, -1.6)))
+				rotatedShapes = append(rotatedShapes, repositioned.Rotate(curAngle, vector.Vector2Zero()))
+			}
+		}
+		return rotatedShapes
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	topTextCentered := topText.Translate(vector.NewVector3(
+		-topText.GetCenterOfBoundingBox().X(),
 		medallionThickness-medallionImpression,
-		-offset.Z(),
+		-.5,
 	))
 
-	err = saveMedal(medal.Merge(textCentered), "out.obj")
+	bottomTextCentered := bottomText.Translate(vector.NewVector3(
+		-bottomText.GetCenterOfBoundingBox().X(),
+		medallionThickness-medallionImpression,
+		.5,
+	))
+
+	err = saveMedal(medal.Merge(topTextCentered).Merge(bottomTextCentered), "out.obj")
 
 	if err != nil {
 		panic(err)

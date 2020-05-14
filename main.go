@@ -263,12 +263,18 @@ func makeRing(resolution int, startingHeight, endingHeight, bottomRadius, topRad
 	return polys
 }
 
+func Reverse(s string) string {
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
+}
+
 // MakeMedalion creates a 3D object that represents a medal
-func MakeMedalion(medalionThickness, designImpression float64) (mesh.Model, error) {
+func MakeMedalion(startingRadius, medalionThickness, designImpression float64) (mesh.Model, error) {
 
 	defer timeTrack(time.Now(), "Creating Medal")
-
-	startingRadius := 1.
 
 	// How much extra radius will be added to the side of the medal as it bulges
 	maxRadiusBulge := .1
@@ -411,7 +417,7 @@ func ExtrudeShape(shapes []mesh.Shape, dist float64) (mesh.Model, error) {
 	return model.Merge(otherEnd).Merge(stiches), nil
 }
 
-func TextToModel(text string, extrusion float64, letterShapeModifier func([][]mesh.Shape) []mesh.Shape) (mesh.Model, error) {
+func TextToModel(text string, scale, extrusion float64, letterShapeModifier func([][]mesh.Shape) []mesh.Shape) (mesh.Model, error) {
 	letterShapes, err := TextToShape(text)
 	if err != nil {
 		return mesh.Model{}, err
@@ -422,7 +428,7 @@ func TextToModel(text string, extrusion float64, letterShapeModifier func([][]me
 		return mesh.Model{}, err
 	}
 
-	return model.Scale(vector.NewVector3(-.4, .4, .4), model.GetCenterOfBoundingBox()), nil
+	return model.Scale(vector.NewVector3(-scale, scale, scale), model.GetCenterOfBoundingBox()), nil
 }
 
 func timeTrack(start time.Time, name string) {
@@ -432,17 +438,19 @@ func timeTrack(start time.Time, name string) {
 
 func main() {
 
-	medallionThickness := .6
+	startingRadius := 1.0
 
-	medallionImpression := .1
+	medallionThickness := 0.3
 
-	medal, err := MakeMedalion(medallionThickness, medallionImpression)
+	medallionImpression := 0.1
+
+	medal, err := MakeMedalion(startingRadius, medallionThickness, medallionImpression)
 
 	if err != nil {
 		panic(err)
 	}
 
-	topText, err := TextToModel("Hello", medallionImpression, func(letters [][]mesh.Shape) []mesh.Shape {
+	topText, err := TextToModel("Aleatha", .4, medallionImpression, func(letters [][]mesh.Shape) []mesh.Shape {
 		rotatedShapes := make([]mesh.Shape, 0)
 		angleIncrements := math.Pi / float64(len(letters))
 
@@ -450,7 +458,9 @@ func main() {
 			curAngle := (math.Pi / 2.0) - (angleIncrements * float64(i)) - (angleIncrements / 2.0)
 			centerOfShapes := mesh.CenterOfBoundingBoxOfShapes(letterShape)
 			for _, shape := range letterShape {
-				repositioned := shape.Translate(centerOfShapes.MultByConstant(-1).Add(vector.NewVector2(0.0, 1.6)))
+				repositioned := shape.
+					Scale(.75).
+					Translate(centerOfShapes.MultByConstant(-1).Add(vector.NewVector2(0.0, startingRadius*2)))
 				rotatedShapes = append(rotatedShapes, repositioned.Rotate(curAngle, vector.Vector2Zero()))
 			}
 		}
@@ -461,7 +471,7 @@ func main() {
 		panic(err)
 	}
 
-	bottomText, err := TextToModel("dlroW", medallionImpression, func(letters [][]mesh.Shape) []mesh.Shape {
+	bottomText, err := TextToModel(Reverse(" Singleton "), .4, medallionImpression, func(letters [][]mesh.Shape) []mesh.Shape {
 		rotatedShapes := make([]mesh.Shape, 0)
 		angleIncrements := math.Pi / float64(len(letters))
 
@@ -469,7 +479,9 @@ func main() {
 			curAngle := (math.Pi / 2.0) - (angleIncrements * float64(i)) - (angleIncrements / 2.0)
 			centerOfShapes := mesh.CenterOfBoundingBoxOfShapes(letterShape)
 			for _, shape := range letterShape {
-				repositioned := shape.Translate(centerOfShapes.MultByConstant(-1).Add(vector.NewVector2(0.0, -1.6)))
+				repositioned := shape.
+					// Scale(.75).
+					Translate(centerOfShapes.MultByConstant(-1).Add(vector.NewVector2(0.0, -startingRadius*2)))
 				rotatedShapes = append(rotatedShapes, repositioned.Rotate(curAngle, vector.Vector2Zero()))
 			}
 		}
@@ -483,16 +495,55 @@ func main() {
 	topTextCentered := topText.Translate(vector.NewVector3(
 		-topText.GetCenterOfBoundingBox().X(),
 		medallionThickness-medallionImpression,
-		-.5,
+		-.75,
 	))
 
 	bottomTextCentered := bottomText.Translate(vector.NewVector3(
 		-bottomText.GetCenterOfBoundingBox().X(),
 		medallionThickness-medallionImpression,
-		.5,
+		1,
 	))
 
-	err = saveMedal(medal.Merge(topTextCentered).Merge(bottomTextCentered), "out.obj")
+	logoReader, err := os.Open("its_logo.stl.obj")
+	if err != nil {
+		panic(err)
+	}
+
+	logoMesh, err := importOBJ(logoReader)
+	if err != nil {
+		panic(err)
+	}
+
+	smallerLogo := logoMesh.
+		Scale(
+			vector.Vector3One().MultByConstant(1.0/30.0),
+			logoMesh.GetCenterOfBoundingBox(),
+		)
+
+	smallerLogo = Rotate(
+		smallerLogo,
+		smallerLogo.GetCenterOfBoundingBox(),
+		mesh.NewQuaternion(vector.Vector3Right(), -math.Sin(math.Pi/2)),
+	)
+
+	smallerLogo = Rotate(
+		smallerLogo,
+		smallerLogo.GetCenterOfBoundingBox(),
+		mesh.NewQuaternion(vector.Vector3Up(), -math.Sin(math.Pi)),
+	)
+
+	smallerLogo = smallerLogo.
+		Translate(vector.NewVector3(0, .2, 0).Sub(smallerLogo.GetCenterOfBoundingBox()))
+
+	smallerLogo = smallerLogo.
+		Scale(
+			vector.NewVector3(1.0/3.0, 1, 1.0/3.0),
+			smallerLogo.GetCenterOfBoundingBox(),
+		).
+		Translate(vector.NewVector3(0, .02, 0))
+
+	// err = saveMedal(medal.Merge(topTextCentered), "out.obj")
+	err = saveMedal(medal.Merge(smallerLogo).Merge(topTextCentered).Merge(bottomTextCentered), "out.obj")
 
 	if err != nil {
 		panic(err)
